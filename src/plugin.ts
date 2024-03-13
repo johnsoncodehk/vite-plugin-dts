@@ -3,11 +3,16 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { cpus } from 'node:os'
 
-import { createParsedCommandLine } from '@vue/language-core'
+import {
+  createParsedCommandLine,
+  createVueLanguagePlugin,
+  resolveVueCompilerOptions
+} from '@vue/language-core'
+
+import { proxyCreateProgram } from '@volar/typescript'
 
 import ts from 'typescript'
 import { createFilter } from '@rollup/pluginutils'
-import { createProgram } from 'vue-tsc'
 import debug from 'debug'
 import { cyan, green, yellow } from 'kolorist'
 import { rollupDeclarationFiles } from './rollup'
@@ -33,7 +38,6 @@ import {
 } from './utils'
 
 import type { Alias, Logger } from 'vite'
-import type { _Program as Program } from 'vue-tsc'
 import type { PluginOptions, Resolver } from './types'
 
 const jsRE = /\.(m|c)?jsx?$/
@@ -105,7 +109,7 @@ export function dtsPlugin(options: PluginOptions = {}): import('vite').Plugin {
   let indexName: string
   let logger: Logger
   let host: ts.CompilerHost | undefined
-  let program: Program | undefined
+  let program: ts.Program | undefined
   let filter: ReturnType<typeof createFilter>
 
   let bundled = false
@@ -332,6 +336,22 @@ export function dtsPlugin(options: PluginOptions = {}): import('vite').Plugin {
             .map(normalizePath)
         )
       ]
+      const vueLanguagePlugin = createVueLanguagePlugin(
+        ts,
+        fileName => fileName,
+        fileName => {
+          if (ts.sys.useCaseSensitiveFileNames) {
+            return rootNames.some(name => name.toLowerCase() === fileName.toLowerCase())
+          } else {
+            return rootNames.some(name => name === fileName)
+          }
+        },
+        compilerOptions,
+        resolveVueCompilerOptions(content?.vueOptions ?? {})
+      )
+      const createProgram = proxyCreateProgram(ts, ts.createProgram, ['.vue'], () => [
+        vueLanguagePlugin
+      ])
 
       host = ts.createCompilerHost(compilerOptions)
       program = createProgram({
